@@ -13,14 +13,14 @@ class Config:
             "market": "yfinance"
         },
         "BTC": {
-            "symbol": "BTCUSDT",
-            "timeframe": "15",
-            "market": "bybit"
+            "symbol": "BTC-USDT-SWAP",
+            "timeframe": "15m",
+            "market": "okx"
         },
         "ETH": {
-            "symbol": "ETHUSDT",
-            "timeframe": "15",
-            "market": "bybit"
+            "symbol": "ETH-USDT-SWAP",
+            "timeframe": "15m",
+            "market": "okx"
         }
     }
 
