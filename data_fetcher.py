@@ -8,17 +8,14 @@ class DataFetcher:
         self.asset = asset_config
 
     def get_ohlcv(self, limit=200):
-        market = self.asset["market"]
-
-        if market == "yfinance":
+        if self.asset["market"] == "yfinance":
             return self._fetch_yfinance(limit)
-        elif market == "bybit":
-            return self._fetch_bybit(limit)
-        else:
-            return None
+        elif self.asset["market"] == "okx":
+            return self._fetch_okx(limit)
+        return None
 
     # -------------------------
-    # USOIL — Yahoo Finance
+    # USOIL (Yahoo Finance)
     # -------------------------
     def _fetch_yfinance(self, limit):
         df = yf.download(
@@ -40,61 +37,44 @@ class DataFetcher:
         return df[["open", "high", "low", "close", "volume"]].tail(limit)
 
     # -------------------------
-    # BTC / ETH — BYBIT FUTURES (FINAL FIX)
+    # BTC / ETH — OKX FUTURES
     # -------------------------
-    def _fetch_bybit(self, limit):
-        url = "https://api.bybit.com/v5/market/kline"
+    def _fetch_okx(self, limit):
+        url = "https://www.okx.com/api/v5/market/candles"
 
         params = {
-            "category": "linear",              # USDT perpetuals
-            "symbol": self.asset["symbol"],    # BTCUSDT / ETHUSDT
-            "interval": str(self.asset["timeframe"]),
+            "instId": self.asset["symbol"],   # BTC-USDT-SWAP
+            "bar": self.asset["timeframe"],  # 15m
             "limit": limit
         }
 
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-
-        for attempt in range(3):
+        for _ in range(3):  # retry
             try:
-                r = requests.get(url, params=params, headers=headers, timeout=10)
+                r = requests.get(url, params=params, timeout=10)
                 data = r.json()
 
-                # ❌ API-level error
-                if data.get("retCode") != 0:
+                if data.get("code") != "0":
                     time.sleep(1)
                     continue
 
-                result = data.get("result", {})
-                candles = result.get("list", [])
-
-                # ❌ No candles returned
+                candles = data.get("data", [])
                 if not candles or len(candles) < 10:
                     time.sleep(1)
                     continue
 
-                # Bybit returns newest → oldest, reverse it
+                # OKX returns newest → oldest
                 candles = candles[::-1]
 
                 df = pd.DataFrame(
                     candles,
                     columns=[
-                        "open_time",
-                        "open",
-                        "high",
-                        "low",
-                        "close",
-                        "volume",
-                        "turnover",
-                    ],
+                        "ts", "open", "high", "low",
+                        "close", "volume", "volume_ccy", "volume_ccy_quote", "confirm"
+                    ]
                 )
 
-                # Convert to float safely
-                df = df[["open", "high", "low", "close", "volume"]]
-                df = df.astype(float)
+                df = df[["open", "high", "low", "close", "volume"]].astype(float)
 
-                # Final sanity check
                 if df.isnull().any().any():
                     continue
 
@@ -103,5 +83,4 @@ class DataFetcher:
             except Exception:
                 time.sleep(1)
 
-        # 🔥 only here if truly failed
         return None
