@@ -4,7 +4,11 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 from config import Config
 from data_fetcher import DataFetcher
-from pattern_detector import SmartMoneyDetector, ElliotWaveDetector, SupportResistanceDetector
+from pattern_detector import (
+    SmartMoneyDetector,
+    ElliotWaveDetector,
+    SupportResistanceDetector
+)
 from signal_generator import SignalGenerator
 
 logging.basicConfig(level=logging.INFO)
@@ -13,8 +17,12 @@ logger = logging.getLogger(__name__)
 class TradingBot:
 
     def __init__(self):
-        self.user_symbol = {}  # chat_id → symbol key
+        # Store selected asset per user
+        self.user_asset = {}
 
+    # -------------------------
+    # Keyboards
+    # -------------------------
     def asset_keyboard(self):
         return InlineKeyboardMarkup([
             [
@@ -32,26 +40,34 @@ class TradingBot:
             [InlineKeyboardButton("🔁 Change Asset", callback_data="change_asset")]
         ])
 
+    # -------------------------
+    # /start
+    # -------------------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "🤖 *Multi-Asset Smart Money Bot*\n\nSelect an asset:",
+            "🤖 *Multi-Asset Trading Bot*\n\nSelect an asset:",
             reply_markup=self.asset_keyboard(),
             parse_mode="Markdown"
         )
 
+    # -------------------------
+    # Button Handler
+    # -------------------------
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
         await query.answer()
         chat_id = query.message.chat_id
 
         try:
+            # -------------------------
             # Asset selection
+            # -------------------------
             if query.data.startswith("asset_"):
                 asset = query.data.split("_")[1]
-                self.user_symbol[chat_id] = asset
+                self.user_asset[chat_id] = asset
 
                 await query.edit_message_text(
-                    f"✅ Selected *{asset}*\n\nChoose action:",
+                    f"✅ Selected *{asset}*\n\nChoose an action:",
                     reply_markup=self.action_keyboard(),
                     parse_mode="Markdown"
                 )
@@ -64,24 +80,34 @@ class TradingBot:
                 )
                 return
 
-            asset = self.user_symbol.get(chat_id, Config.DEFAULT_SYMBOL)
-            symbol = Config.SYMBOLS[asset]
+            # -------------------------
+            # Get selected asset config
+            # 🔥 UPDATED LINES (AS REQUESTED)
+            # -------------------------
+            asset = self.user_asset.get(chat_id, Config.DEFAULT_ASSET)
+            asset_cfg = Config.ASSETS[asset]
+            df = DataFetcher(asset_cfg).get_ohlcv()
 
-            df = DataFetcher(symbol).get_ohlcv("1h")
-            if df is None:
+            if df is None or df.empty:
                 await query.message.reply_text("❌ Market data unavailable")
                 return
 
+            # -------------------------
+            # Analysis pipeline
+            # -------------------------
             smc = SmartMoneyDetector(df).detect_all_patterns()
             waves = ElliotWaveDetector(df).detect_waves()
             levels = SupportResistanceDetector(df).detect_levels()
             signals = SignalGenerator(df, smc, waves, levels).generate_signals()
 
+            # -------------------------
+            # Responses
+            # -------------------------
             if query.data == "analysis":
                 text = (
-                    f"*{asset} Analysis (1H)*\n\n"
+                    f"*{asset} Analysis ({asset_cfg['timeframe']})*\n\n"
                     f"Price: {df['close'].iloc[-1]:.2f}\n"
-                    f"OBs: {len(smc['order_blocks'])}\n"
+                    f"Order Blocks: {len(smc['order_blocks'])}\n"
                     f"FVGs: {len(smc['fvgs'])}\n"
                     f"Waves: {len(waves)}"
                 )
@@ -112,16 +138,23 @@ class TradingBot:
             else:
                 text = "Unknown action"
 
-            await query.message.reply_text(text, parse_mode="Markdown")
+            # Try editing message, fallback to reply
+            try:
+                await query.edit_message_text(text, parse_mode="Markdown")
+            except Exception:
+                await query.message.reply_text(text, parse_mode="Markdown")
 
         except Exception:
             logger.exception("Callback error")
-            await query.message.reply_text("❌ Internal error")
+            await query.message.reply_text("❌ Internal error occurred")
 
+# -------------------------
+# App Entrypoint
+# -------------------------
 def main():
     app = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
-    bot = TradingBot()
 
+    bot = TradingBot()
     app.add_handler(CommandHandler("start", bot.start))
     app.add_handler(CallbackQueryHandler(bot.button_handler))
 
