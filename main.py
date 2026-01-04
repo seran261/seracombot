@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
@@ -21,7 +20,7 @@ class USOILBot:
         keyboard = [
             [InlineKeyboardButton("📊 Analysis", callback_data="analysis")],
             [InlineKeyboardButton("🔔 Signals", callback_data="signals")],
-            [InlineKeyboardButton("📈 S/R Levels", callback_data="levels")],
+            [InlineKeyboardButton("📈 S/R Levels", callback_data="levels")]
         ]
         await update.message.reply_text(
             "🤖 *USOIL Smart Money Bot*\n\nChoose an option:",
@@ -45,25 +44,26 @@ class USOILBot:
 
         if query.data == "analysis":
             await query.edit_message_text(
-                f"*USOIL Analysis*\n\nPrice: ${df['close'].iloc[-1]:.2f}\n"
-                f"OBs: {len(smc['order_blocks'])}\n"
+                f"*USOIL Analysis (1H)*\n\n"
+                f"Price: ${df['close'].iloc[-1]:.2f}\n"
+                f"Order Blocks: {len(smc['order_blocks'])}\n"
                 f"FVGs: {len(smc['fvgs'])}\n"
-                f"Waves: {len(waves)}",
+                f"Elliott Waves: {len(waves)}",
                 parse_mode="Markdown"
             )
 
         elif query.data == "signals":
             if not signals:
-                await query.edit_message_text("❌ No valid signals")
+                await query.edit_message_text("❌ No valid signals found")
                 return
 
             s = signals[0]
             await query.edit_message_text(
                 f"🚨 *{s['type']} SIGNAL*\n\n"
                 f"Entry: {s['entry']:.2f}\n"
-                f"SL: {s['sl']:.2f}\n"
-                f"TP: {s['target']:.2f}\n"
-                f"RR: {s['rr']:.2f}\n"
+                f"Stop Loss: {s['sl']:.2f}\n"
+                f"Target: {s['target']:.2f}\n"
+                f"Risk/Reward: {s['rr']:.2f}\n"
                 f"Strength: {s['strength']}%",
                 parse_mode="Markdown"
             )
@@ -78,15 +78,15 @@ class USOILBot:
                 parse_mode="Markdown"
             )
 
-async def main():
-    app = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
+def main():
+    application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
     bot = USOILBot()
 
-    app.add_handler(CommandHandler("start", bot.start))
-    app.add_handler(CallbackQueryHandler(bot.button_handler))
+    application.add_handler(CommandHandler("start", bot.start))
+    application.add_handler(CallbackQueryHandler(bot.button_handler))
 
     logger.info("USOIL Telegram Bot Running...")
-    await app.run_polling()
+    application.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
