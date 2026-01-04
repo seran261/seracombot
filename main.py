@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 class USOILBot:
 
     def __init__(self):
-        self.config = Config()
-        self.fetcher = DataFetcher(self.config.USOIL_SYMBOL)
+        self.fetcher = DataFetcher(Config.USOIL_SYMBOL)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [
@@ -30,58 +29,71 @@ class USOILBot:
 
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
+
+        # ALWAYS acknowledge callback immediately
         await query.answer()
 
-        df = self.fetcher.get_ohlcv("1h")
-        if df is None or df.empty:
-            await query.edit_message_text("❌ Market data unavailable")
-            return
+        try:
+            df = self.fetcher.get_ohlcv("1h")
 
-        smc = SmartMoneyDetector(df).detect_all_patterns()
-        waves = ElliotWaveDetector(df).detect_waves()
-        levels = SupportResistanceDetector(df).detect_levels()
-        signals = SignalGenerator(df, smc, waves, levels).generate_signals()
-
-        if query.data == "analysis":
-            await query.edit_message_text(
-                f"*USOIL Analysis (1H)*\n\n"
-                f"Price: ${df['close'].iloc[-1]:.2f}\n"
-                f"Order Blocks: {len(smc['order_blocks'])}\n"
-                f"FVGs: {len(smc['fvgs'])}\n"
-                f"Elliott Waves: {len(waves)}",
-                parse_mode="Markdown"
-            )
-
-        elif query.data == "signals":
-            if not signals:
-                await query.edit_message_text("❌ No valid signals found")
+            if df is None or df.empty:
+                await query.message.reply_text("❌ Market data unavailable")
                 return
 
-            s = signals[0]
-            await query.edit_message_text(
-                f"🚨 *{s['type']} SIGNAL*\n\n"
-                f"Entry: {s['entry']:.2f}\n"
-                f"Stop Loss: {s['sl']:.2f}\n"
-                f"Target: {s['target']:.2f}\n"
-                f"Risk/Reward: {s['rr']:.2f}\n"
-                f"Strength: {s['strength']}%",
-                parse_mode="Markdown"
-            )
+            smc = SmartMoneyDetector(df).detect_all_patterns()
+            waves = ElliotWaveDetector(df).detect_waves()
+            levels = SupportResistanceDetector(df).detect_levels()
+            signals = SignalGenerator(df, smc, waves, levels).generate_signals()
 
-        elif query.data == "levels":
-            await query.edit_message_text(
-                f"*Support & Resistance*\n\n"
-                f"S1: {levels['s1']:.2f}\n"
-                f"S2: {levels['s2']:.2f}\n"
-                f"R1: {levels['r1']:.2f}\n"
-                f"R2: {levels['r2']:.2f}",
-                parse_mode="Markdown"
-            )
+            if query.data == "analysis":
+                text = (
+                    f"*USOIL Analysis (1H)*\n\n"
+                    f"Price: ${df['close'].iloc[-1]:.2f}\n"
+                    f"Order Blocks: {len(smc['order_blocks'])}\n"
+                    f"FVGs: {len(smc['fvgs'])}\n"
+                    f"Elliott Waves: {len(waves)}"
+                )
+
+            elif query.data == "signals":
+                if not signals:
+                    text = "❌ No valid signals right now"
+                else:
+                    s = signals[0]
+                    text = (
+                        f"🚨 *{s['type']} SIGNAL*\n\n"
+                        f"Entry: {s['entry']:.2f}\n"
+                        f"SL: {s['sl']:.2f}\n"
+                        f"TP: {s['target']:.2f}\n"
+                        f"RR: {s['rr']:.2f}\n"
+                        f"Strength: {s['strength']}%"
+                    )
+
+            elif query.data == "levels":
+                text = (
+                    f"*Support & Resistance*\n\n"
+                    f"S1: {levels['s1']:.2f}\n"
+                    f"S2: {levels['s2']:.2f}\n"
+                    f"R1: {levels['r1']:.2f}\n"
+                    f"R2: {levels['r2']:.2f}"
+                )
+            else:
+                text = "Unknown action"
+
+            # Try editing first
+            try:
+                await query.edit_message_text(text, parse_mode="Markdown")
+            except Exception:
+                # Fallback if edit fails
+                await query.message.reply_text(text, parse_mode="Markdown")
+
+        except Exception as e:
+            logger.exception("Callback error")
+            await query.message.reply_text("❌ Internal error, check logs")
 
 def main():
     application = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
-    bot = USOILBot()
 
+    bot = USOILBot()
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CallbackQueryHandler(bot.button_handler))
 
