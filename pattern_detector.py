@@ -1,52 +1,43 @@
-import numpy as np
-from scipy.signal import find_peaks
-
-class SmartMoneyDetector:
-    def __init__(self, df):
+class SignalGenerator:
+    def __init__(self, df, smc, waves, levels):
         self.df = df
+        self.levels = levels
 
-    def detect_all_patterns(self):
-        return {
-            "order_blocks": self.df.tail(5).to_dict(),
-            "fvgs": self.df.tail(3).to_dict()
-        }
-
-class ElliotWaveDetector:
-    def __init__(self, df):
-        self.df = df
-
-    def detect_waves(self):
-        """
-        FIX:
-        Ensure input to find_peaks is a clean 1D numpy array
-        """
+    def generate_signals(self):
         try:
-            high_series = self.df['high']
+            # 🔥 FORCE scalar values
+            price = float(self.df['close'].iloc[-1])
+            s1 = float(self.levels['s1'])
+            r1 = float(self.levels['r1'])
 
-            # 🔥 CRITICAL FIX: flatten to 1D array
-            high_values = np.asarray(high_series).astype(float).ravel()
-
-            if len(high_values) < 10:
+            # Basic validation
+            if s1 <= 0 or r1 <= 0:
                 return []
 
-            peaks, _ = find_peaks(high_values, distance=5)
-            return peaks.tolist()
+            signals = []
 
-        except Exception as e:
+            if price > s1:
+                signals.append({
+                    "type": "BUY",
+                    "entry": price,
+                    "sl": s1,
+                    "target": r1,
+                    "rr": round(abs(r1 - price) / abs(price - s1), 2),
+                    "strength": 70
+                })
+
+            elif price < r1:
+                signals.append({
+                    "type": "SELL",
+                    "entry": price,
+                    "sl": r1,
+                    "target": s1,
+                    "rr": round(abs(price - s1) / abs(r1 - price), 2),
+                    "strength": 70
+                })
+
+            return signals
+
+        except Exception:
             # Fail-safe: never break the bot
             return []
-
-class SupportResistanceDetector:
-    def __init__(self, df):
-        self.df = df
-
-    def detect_levels(self):
-        lows = np.asarray(self.df['low']).astype(float).ravel()
-        highs = np.asarray(self.df['high']).astype(float).ravel()
-
-        return {
-            "s1": float(np.min(lows[-50:])),
-            "s2": float(np.min(lows[-100:])),
-            "r1": float(np.max(highs[-50:])),
-            "r2": float(np.max(highs[-100:]))
-        }
