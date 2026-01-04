@@ -6,7 +6,6 @@ load_dotenv()
 class Config:
     TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-    # Asset configuration
     ASSETS = {
         "USOIL": {
             "symbol": "CL=F",
@@ -15,13 +14,13 @@ class Config:
         },
         "BTC": {
             "symbol": "BTCUSDT",
-            "timeframe": "15m",
-            "market": "binance_futures"
+            "timeframe": "15",
+            "market": "bybit"
         },
         "ETH": {
             "symbol": "ETHUSDT",
-            "timeframe": "15m",
-            "market": "binance_futures"
+            "timeframe": "15",
+            "market": "bybit"
         }
     }
 
