@@ -10,8 +10,10 @@ class DataFetcher:
     def get_ohlcv(self, limit=300):
         if self.asset["market"] == "yfinance":
             return self._fetch_yfinance(limit)
+        elif self.asset["market"] == "bybit":
+            return self._fetch_bybit(limit)
         else:
-            return self._fetch_binance_futures(limit)
+            return None
 
     # -------------------------
     # USOIL (Yahoo Finance)
@@ -36,27 +38,41 @@ class DataFetcher:
         return df[['open', 'high', 'low', 'close', 'volume']].tail(limit)
 
     # -------------------------
-    # BTC / ETH (Binance Futures)
+    # BTC / ETH (Bybit Futures)
     # -------------------------
-    def _fetch_binance_futures(self, limit):
-        url = "https://fapi.binance.com/fapi/v1/klines"
+    def _fetch_bybit(self, limit):
+        url = "https://api.bybit.com/v5/market/kline"
         params = {
+            "category": "linear",
             "symbol": self.asset["symbol"],
             "interval": self.asset["timeframe"],
             "limit": limit
         }
 
-        r = requests.get(url, params=params, timeout=10)
-        data = r.json()
+        for _ in range(2):  # retry once
+            try:
+                r = requests.get(url, params=params, timeout=10)
+                data = r.json()
 
-        if not isinstance(data, list):
-            return None
+                if data.get("retCode") != 0:
+                    time.sleep(1)
+                    continue
 
-        df = pd.DataFrame(data, columns=[
-            "open_time", "open", "high", "low", "close", "volume",
-            "close_time", "qav", "num_trades",
-            "taker_base", "taker_quote", "ignore"
-        ])
+                candles = data["result"]["list"]
+                if not candles:
+                    return None
 
-        df = df[["open", "high", "low", "close", "volume"]].astype(float)
-        return df
+                # Bybit returns newest first → reverse
+                candles = candles[::-1]
+
+                df = pd.DataFrame(candles, columns=[
+                    "open_time", "open", "high", "low", "close", "volume", "turnover"
+                ])
+
+                df = df[["open", "high", "low", "close", "volume"]].astype(float)
+                return df
+
+            except Exception:
+                time.sleep(1)
+
+        return None
