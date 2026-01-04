@@ -1,5 +1,4 @@
 import yfinance as yf
-import pandas as pd
 
 class DataFetcher:
     def __init__(self, symbol):
@@ -13,9 +12,9 @@ class DataFetcher:
             progress=False
         )
 
-        if df.empty:
+        if df is None or df.empty:
             return None
 
-        df = df.rename(columns=str.lower)
+        df.columns = [c.lower() for c in df.columns]
         df = df[['open', 'high', 'low', 'close', 'volume']]
         return df.tail(limit)
