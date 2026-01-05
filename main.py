@@ -17,8 +17,7 @@ logger = logging.getLogger(__name__)
 class TradingBot:
 
     def __init__(self):
-        # Store selected asset per user
-        self.user_asset = {}
+        self.user_asset = {}  # chat_id → asset key
 
     # -------------------------
     # Keyboards
@@ -41,17 +40,17 @@ class TradingBot:
         ])
 
     # -------------------------
-    # /start
+    # /start command
     # -------------------------
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "🤖 *Multi-Asset Trading Bot*\n\nSelect an asset:",
+            "🤖 *Multi-Asset Smart Trading Bot*\n\nSelect an asset:",
             reply_markup=self.asset_keyboard(),
             parse_mode="Markdown"
         )
 
     # -------------------------
-    # Button Handler
+    # Button handler
     # -------------------------
     async def button_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -81,13 +80,12 @@ class TradingBot:
                 return
 
             # -------------------------
-            # Get selected asset config
-            # 🔥 UPDATED LINES (AS REQUESTED)
+            # Load asset config
             # -------------------------
             asset = self.user_asset.get(chat_id, Config.DEFAULT_ASSET)
             asset_cfg = Config.ASSETS[asset]
-            df = DataFetcher(asset_cfg).get_ohlcv()
 
+            df = DataFetcher(asset_cfg).get_ohlcv()
             if df is None or df.empty:
                 await query.message.reply_text("❌ Market data unavailable")
                 return
@@ -101,7 +99,7 @@ class TradingBot:
             signals = SignalGenerator(df, smc, waves, levels).generate_signals()
 
             # -------------------------
-            # Responses
+            # ANALYSIS
             # -------------------------
             if query.data == "analysis":
                 text = (
@@ -109,12 +107,15 @@ class TradingBot:
                     f"Price: {df['close'].iloc[-1]:.2f}\n"
                     f"Order Blocks: {len(smc['order_blocks'])}\n"
                     f"FVGs: {len(smc['fvgs'])}\n"
-                    f"Waves: {len(waves)}"
+                    f"Elliott Waves: {len(waves)}"
                 )
 
+            # -------------------------
+            # SIGNALS
+            # -------------------------
             elif query.data == "signals":
                 if not signals:
-                    text = f"❌ No valid {asset} signals"
+                    text = f"❌ No valid {asset} signals right now"
                 else:
                     s = signals[0]
                     text = (
@@ -123,22 +124,36 @@ class TradingBot:
                         f"SL: {s['sl']:.2f}\n"
                         f"TP: {s['target']:.2f}\n"
                         f"RR: {s['rr']}\n"
-                        f"Strength: {s['strength']}%"
+                        f"Bias: {s['strength']}"
                     )
 
+            # -------------------------
+            # SUPPORT / RESISTANCE (FIXED)
+            # -------------------------
             elif query.data == "levels":
+
+                def fmt(level_list):
+                    if not level_list:
+                        return "—"
+                    return "\n".join(
+                        f"• {lvl['price']:.2f} ({lvl['strength']})"
+                        for lvl in level_list
+                    )
+
                 text = (
                     f"*{asset} Support & Resistance*\n\n"
-                    f"S1: {levels['s1']:.2f}\n"
-                    f"S2: {levels['s2']:.2f}\n"
-                    f"R1: {levels['r1']:.2f}\n"
-                    f"R2: {levels['r2']:.2f}"
+                    f"*HTF Support*\n{fmt(levels.get('HTF_support'))}\n\n"
+                    f"*HTF Resistance*\n{fmt(levels.get('HTF_resistance'))}\n\n"
+                    f"*LTF Support*\n{fmt(levels.get('LTF_support'))}\n\n"
+                    f"*LTF Resistance*\n{fmt(levels.get('LTF_resistance'))}"
                 )
 
             else:
                 text = "Unknown action"
 
-            # Try editing message, fallback to reply
+            # -------------------------
+            # Send response
+            # -------------------------
             try:
                 await query.edit_message_text(text, parse_mode="Markdown")
             except Exception:
@@ -149,7 +164,7 @@ class TradingBot:
             await query.message.reply_text("❌ Internal error occurred")
 
 # -------------------------
-# App Entrypoint
+# App entry point
 # -------------------------
 def main():
     app = Application.builder().token(Config.TELEGRAM_BOT_TOKEN).build()
