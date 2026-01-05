@@ -13,13 +13,12 @@ class SignalGenerator:
         return float(self.df["close"].iloc[-2])
 
     def atr(self, period=14):
-        high = self.df["high"]
-        low = self.df["low"]
-        close = self.df["close"]
-        tr = (high - low).rolling(period).mean()
+        tr = (self.df["high"] - self.df["low"]).rolling(period).mean()
         return float(tr.iloc[-1])
 
     def nearest(self, levels, above=True):
+        if not levels:
+            return None
         p = self.price()
         prices = [l["price"] for l in levels]
         if above:
@@ -30,61 +29,45 @@ class SignalGenerator:
             return max(lower) if lower else None
 
     # -------------------------
-    # Market structure logic
+    # Structure logic
     # -------------------------
-    def in_htf_midrange(self, support, resistance):
-        if not support or not resistance:
+    def in_htf_midrange(self, sup, res):
+        if not sup or not res:
             return False
-        mid = (support + resistance) / 2
-        return abs(self.price() - mid) / mid < 0.002  # ~0.2%
+        mid = (sup + res) / 2
+        return abs(self.price() - mid) / mid < 0.001  # relaxed
 
-    def liquidity_sweep(self, level, direction):
-        """
-        Price sweeps HTF level and closes back inside
-        """
+    def liquidity_sweep(self, level, side):
         if not level:
             return False
-
         prev = self.prev_price()
         curr = self.price()
+        return (prev < level and curr > level) if side == "buy" else (prev > level and curr < level)
 
-        if direction == "buy":
-            return prev < level and curr > level
-        else:
-            return prev > level and curr < level
-
-    def break_and_retest(self, level, direction):
-        """
-        Break → pullback → continuation
-        """
+    def break_retest(self, level, side):
         if not level:
             return False
-
         prev = self.prev_price()
         curr = self.price()
-
-        if direction == "buy":
-            return prev > level and curr >= level
-        else:
-            return prev < level and curr <= level
+        return (prev >= level and curr >= level) if side == "buy" else (prev <= level and curr <= level)
 
     # -------------------------
     # Confidence scoring
     # -------------------------
-    def confidence(self, rr, sweep, retest, volume_ok):
+    def confidence_score(self, rr, sweep, retest, volume_ok):
         score = 40
+        if rr >= 1.3:
+            score += 15
         if sweep:
-            score += 20
+            score += 15
         if retest:
             score += 15
-        if rr >= 2:
-            score += 15
         if volume_ok:
-            score += 10
+            score += 15
         return min(score, 100)
 
     # -------------------------
-    # Main Signal Engine
+    # Main Engine
     # -------------------------
     def generate_signals(self):
         try:
@@ -99,71 +82,65 @@ class SignalGenerator:
             htf_support = self.nearest(htf_sup, above=False)
             htf_resistance = self.nearest(htf_res, above=True)
 
-            # 🔒 Disable trading in HTF midpoint
+            # 🔒 Skip bad HTF structure
             if self.in_htf_midrange(htf_support, htf_resistance):
                 return []
 
             signals = []
 
             # =========================
-            # LONG SETUP
+            # BUY SETUP
             # =========================
             if htf_support and price > htf_support:
-                sweep = self.liquidity_sweep(htf_support, "buy")
-                retest = self.break_and_retest(
-                    self.nearest(ltf_sup, above=False), "buy"
-                )
+                entry = price
+                sl = htf_support - atr * 0.4
+                tp = htf_resistance
 
-                if sweep and retest:
-                    entry = price
-                    sl = htf_support - atr * 0.5   # 🔥 SL beyond HTF
-                    tp = htf_resistance
+                if tp and sl and tp > entry > sl:
+                    rr = round((tp - entry) / (entry - sl), 2)
+                    sweep = self.liquidity_sweep(htf_support, "buy")
+                    retest = self.break_retest(self.nearest(ltf_sup, False), "buy")
+                    volume_ok = self.df["volume"].iloc[-1] > self.df["volume"].rolling(20).mean().iloc[-1]
 
-                    if tp and sl and tp > entry > sl:
-                        rr = round((tp - entry) / (entry - sl), 2)
-                        if rr >= 1.5:
-                            vol_ok = self.df["volume"].iloc[-1] > self.df["volume"].rolling(20).mean().iloc[-1]
-                            conf = self.confidence(rr, sweep, retest, vol_ok)
+                    conf = self.confidence_score(rr, sweep, retest, volume_ok)
 
-                            signals.append({
-                                "type": "BUY",
-                                "entry": entry,
-                                "sl": sl,
-                                "target": tp,
-                                "rr": rr,
-                                "strength": f"Confidence {conf}/100",
-                                "confidence": conf
-                            })
+                    if rr >= 1.3 and conf >= 60:
+                        signals.append({
+                            "type": "BUY",
+                            "entry": entry,
+                            "sl": sl,
+                            "target": tp,
+                            "rr": rr,
+                            "confidence": conf,
+                            "strength": f"{conf}/100"
+                        })
 
             # =========================
-            # SHORT SETUP
+            # SELL SETUP
             # =========================
             if htf_resistance and price < htf_resistance:
-                sweep = self.liquidity_sweep(htf_resistance, "sell")
-                retest = self.break_and_retest(
-                    self.nearest(ltf_res, above=True), "sell"
-                )
+                entry = price
+                sl = htf_resistance + atr * 0.4
+                tp = htf_support
 
-                if sweep and retest:
-                    entry = price
-                    sl = htf_resistance + atr * 0.5
-                    tp = htf_support
+                if tp and sl and sl > entry > tp:
+                    rr = round((entry - tp) / (sl - entry), 2)
+                    sweep = self.liquidity_sweep(htf_resistance, "sell")
+                    retest = self.break_retest(self.nearest(ltf_res, True), "sell")
+                    volume_ok = self.df["volume"].iloc[-1] > self.df["volume"].rolling(20).mean().iloc[-1]
 
-                    if tp and sl and sl > entry > tp:
-                        rr = round((entry - tp) / (sl - entry), 2)
-                        if rr >= 1.5:
-                            vol_ok = self.df["volume"].iloc[-1] > self.df["volume"].rolling(20).mean().iloc[-1]
-                            conf = self.confidence(rr, sweep, retest, vol_ok)
+                    conf = self.confidence_score(rr, sweep, retest, volume_ok)
 
-                            signals.append({
-                                "type": "SELL",
-                                "entry": entry,
-                                "sl": sl,
-                                "target": tp,
-                                "rr": rr,
-                                "strength": f"Confidence {conf}/100",
-                                "confidence": conf
-                            })
+                    if rr >= 1.3 and conf >= 60:
+                        signals.append({
+                            "type": "SELL",
+                            "entry": entry,
+                            "sl": sl,
+                            "target": tp,
+                            "rr": rr,
+                            "confidence": conf,
+                            "strength": f"{conf}/100"
+                        })
 
             return signals
 
